@@ -1,118 +1,88 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
-
-import React from 'react';
-import type {PropsWithChildren} from 'react';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, FlatList } from 'react-native';
 import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  View,
-} from 'react-native';
+  accelerometer,
+  gyroscope,
+  setUpdateIntervalForType,
+  SensorTypes
+} from 'react-native-sensors';
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+export default function App() {
+  const [accData, setAccData] = useState([] as Array<{ x: number, y: number, z: number }>);
+  const [gyroData, setGyroData] = useState([] as Array<{ x: number, y: number, z: number }>);
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
+  useEffect(() => {
+    // Set update intervals (milliseconds)
+    setUpdateIntervalForType(SensorTypes.accelerometer, 100);
+    setUpdateIntervalForType(SensorTypes.gyroscope, 100);
 
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+    // Accelerometer subscription
+    const accSubscription = accelerometer.subscribe(({ x, y, z }) => {
+      setAccData(prev => {
+        const updated = [...prev, { x, y, z }];
+        return updated.length > 10 ? updated.slice(-10) : updated;
+      });
+    });
+
+    // Gyroscope subscription
+    const gyroSubscription = gyroscope.subscribe(({ x, y, z }) => {
+      setGyroData(prev => {
+        const updated = [...prev, { x, y, z }];
+        return updated.length > 10 ? updated.slice(-10) : updated;
+      });
+    });
+
+    // Cleanup on unmount
+    return () => {
+      accSubscription.unsubscribe();
+      gyroSubscription.unsubscribe();
+    };
+  }, []);
+
+  const renderItem = ({ item }) => (
+    <Text style={styles.itemText}>
+      x: {item.x.toFixed(2)}, y: {item.y.toFixed(2)}, z: {item.z.toFixed(2)}
+    </Text>
+  );
+
   return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
+    <View style={styles.container}>
+      <Text style={styles.header}>Accelerometer (last 10)</Text>
+      <FlatList
+        style={styles.list}
+        data={accData}
+        renderItem={renderItem}
+        keyExtractor={(item, index) => `acc-${index}`}
+      />
+
+      <Text style={styles.header}>Gyroscope (last 10)</Text>
+      <FlatList
+        style={styles.list}
+        data={gyroData}
+        renderItem={renderItem}
+        keyExtractor={(item, index) => `gyro-${index}`}
+      />
     </View>
   );
 }
 
-function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
-  };
-
-  return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
-
 const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
+  container: {
+    flex: 1,
+    paddingTop: 50,
+    backgroundColor: '#fff'
   },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
+  header: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginHorizontal: 16,
+    marginVertical: 10
   },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
+  list: {
+    marginHorizontal: 16
   },
-  highlight: {
-    fontWeight: '700',
-  },
+  itemText: {
+    fontSize: 16,
+    marginBottom: 5
+  }
 });
-
-export default App;
