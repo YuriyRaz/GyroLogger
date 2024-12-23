@@ -18,6 +18,7 @@ export default function App() {
 
     // Accelerometer subscription
     const accSubscription = accelerometer.subscribe(({ x, y, z }) => {
+      console.log('acc:', { x, y, z });
       setAccData(prev => {
         const updated = [...prev, { x, y, z }];
         return updated.length > 10 ? updated.slice(-10) : updated;
@@ -26,6 +27,7 @@ export default function App() {
 
     // Gyroscope subscription
     const gyroSubscription = gyroscope.subscribe(({ x, y, z }) => {
+      console.log('gyro:', { x, y, z });
       setGyroData(prev => {
         const updated = [...prev, { x, y, z }];
         return updated.length > 10 ? updated.slice(-10) : updated;
