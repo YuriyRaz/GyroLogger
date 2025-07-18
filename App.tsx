@@ -4,7 +4,8 @@ import {
   Text,
   StyleSheet,
   Dimensions,
-  ScrollView
+  ScrollView,
+  Button
 } from 'react-native';
 import {
   accelerometer,
@@ -13,85 +14,88 @@ import {
   SensorTypes
 } from 'react-native-sensors';
 import { LineChart } from 'react-native-chart-kit';
+import RNFS from 'react-native-fs';
+import Share from 'react-native-share';
 
-const MAX_POINTS = 10; // We'll keep 10 points in our arrays
+const MAX_POINTS = 20;
 
-// Clamp / sanitize a single numeric value
+// Safeguard a single numeric value
 function safeValue(val: number): number {
-  // If it's NaN, Infinity, or -Infinity, return 0
   return Number.isFinite(val) ? val : 0;
 }
 
-/**
- * Ensure each array in `arrays` has exactly `maxLength` items.
- * - If an array is longer, slice from the end.
- * - If shorter, pad the front with zeroes.
- * Also apply `safeValue()` to each item.
- */
-function normalizeArrays(
-  arrays: number[][],
-  maxLength: number
-): number[][] {
+// Normalize arrays to the same length = MAX_POINTS, clamp or pad with zeros
+function normalizeArrays(arrays: number[][], maxLength: number): number[][] {
   return arrays.map(arr => {
-    // 1) Apply safeValue to each item
     const clamped = arr.map(safeValue);
-
-    // 2) If array is longer than needed, trim from the end
     if (clamped.length > maxLength) {
       return clamped.slice(clamped.length - maxLength);
     }
-
-    // 3) If array is shorter, pad at the front
     if (clamped.length < maxLength) {
       const missing = maxLength - clamped.length;
       const padding = Array(missing).fill(0);
       return [...padding, ...clamped];
     }
-
-    // 4) Otherwise, array is already the desired length
     return clamped;
   });
 }
 
+// Generate a file-friendly timestamp string
+function createTimestamp(): string {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
 export default function App() {
-  // Store the raw sensor readings
-  const [accData, setAccData] = useState<{ x: number; y: number; z: number }[]>([]);
-  const [gyroData, setGyroData] = useState<{ x: number; y: number; z: number }[]>([]);
+  // Sensor raw data
+  const [accData, setAccData] = useState<Array<{ x: number; y: number; z: number }>>([]);
+  const [gyroData, setGyroData] = useState<Array<{ x: number; y: number; z: number }>>([]);
+
+  // Paths to the .log files we will write
+  const [accLogPath, setAccLogPath] = useState<string>('');
+  const [gyroLogPath, setGyroLogPath] = useState<string>('');
+
+  // Whether we are currently logging
+  const [isLogging, setIsLogging] = useState<boolean>(false);
 
   useEffect(() => {
-    // Set sensor update intervals
     setUpdateIntervalForType(SensorTypes.accelerometer, 100);
     setUpdateIntervalForType(SensorTypes.gyroscope, 100);
 
-    // Subscribe to accelerometer
     const accSubscription = accelerometer.subscribe(({ x, y, z }) => {
-      console.log('acc:', { x, y, z });
+      // Update chart data
       setAccData(prev => {
         const updated = [...prev, { x, y, z }];
-        return updated.length > MAX_POINTS
-          ? updated.slice(updated.length - MAX_POINTS)
-          : updated;
+        return updated.length > MAX_POINTS ? updated.slice(-MAX_POINTS) : updated;
       });
+
+      // If logging, append to file
+      if (isLogging && accLogPath) {
+        const logLine = `${Date.now()},${x},${y},${z}\n`;
+        RNFS.appendFile(accLogPath, logLine, 'utf8').catch(err => console.log('ACC append error:', err));
+      }
     });
 
-    // Subscribe to gyroscope
     const gyroSubscription = gyroscope.subscribe(({ x, y, z }) => {
-      console.log('gyro:', { x, y, z });
+      // Update chart data
       setGyroData(prev => {
         const updated = [...prev, { x, y, z }];
-        return updated.length > MAX_POINTS
-          ? updated.slice(updated.length - MAX_POINTS)
-          : updated;
+        return updated.length > MAX_POINTS ? updated.slice(-MAX_POINTS) : updated;
       });
+
+      // If logging, append to file
+      if (isLogging && gyroLogPath) {
+        const logLine = `${Date.now()},${x},${y},${z}\n`;
+        RNFS.appendFile(gyroLogPath, logLine, 'utf8').catch(err => console.log('GYRO append error:', err));
+      }
     });
 
     return () => {
       accSubscription.unsubscribe();
       gyroSubscription.unsubscribe();
     };
-  }, []);
+  }, [isLogging, accLogPath, gyroLogPath]);
 
-  // Separate X, Y, Z into arrays
+  // Separate x, y, z for charts
   const accX = accData.map(d => d.x);
   const accY = accData.map(d => d.y);
   const accZ = accData.map(d => d.z);
@@ -100,15 +104,15 @@ export default function App() {
   const gyroY = gyroData.map(d => d.y);
   const gyroZ = gyroData.map(d => d.z);
 
-  // Normalize all arrays to length = MAX_POINTS
+  // Force arrays to the same length
   const [accXNorm, accYNorm, accZNorm] = normalizeArrays([accX, accY, accZ], MAX_POINTS);
   const [gyroXNorm, gyroYNorm, gyroZNorm] = normalizeArrays([gyroX, gyroY, gyroZ], MAX_POINTS);
 
-  // Labels: 1..MAX_POINTS
+  // Chart labels 1..10
   const chartLabels = Array.from({ length: MAX_POINTS }, (_, i) => `${i + 1}`);
 
+  // Minimal line chart
   const renderChart = (title: string, xArr: number[], yArr: number[], zArr: number[]) => {
-    // Build data object
     const data = {
       labels: chartLabels,
       datasets: [
@@ -118,10 +122,6 @@ export default function App() {
       ],
       legend: ['X', 'Y', 'Z']
     };
-
-    // Log the final data to confirm no Infinity/NaN
-    console.log(`${title} CHART DATA:`, data);
-
     return (
       <View style={styles.chartContainer}>
         <Text style={styles.chartTitle}>{title}</Text>
@@ -136,16 +136,81 @@ export default function App() {
             labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
             decimalPlaces: 2
           }}
-          // Removing bezier if it causes issues, but you can use it:
-          // bezier
           style={{ marginVertical: 8 }}
+        // bezier // (Optional)
         />
       </View>
     );
   };
 
+  /**
+   * Toggle logging:
+   * - If we start logging, create new files with timestamped names.
+   * - If we stop, just set isLogging to false.
+   */
+  const handleToggleLogging = async () => {
+    if (!isLogging) {
+      // Starting log
+      const time = createTimestamp();
+      const accFileName = `${time}_acc.log`;
+      const gyroFileName = `${time}_gyro.log`;
+
+      // Use app’s document directory or external directory
+      const pathAcc = `${RNFS.DocumentDirectoryPath}/${accFileName}`;
+      const pathGyro = `${RNFS.DocumentDirectoryPath}/${gyroFileName}`;
+
+      // Create empty files
+      try {
+        await RNFS.writeFile(pathAcc, 'timestamp,x,y,z\n', 'utf8');
+        await RNFS.writeFile(pathGyro, 'timestamp,x,y,z\n', 'utf8');
+        setAccLogPath(pathAcc);
+        setGyroLogPath(pathGyro);
+      } catch (err) {
+        console.log('File create error:', err);
+      }
+      setIsLogging(true);
+    } else {
+      // Stopping log
+      setIsLogging(false);
+    }
+  };
+
+  /**
+   * Simple share method. This uses `react-native-share`:
+   * - The user can choose how to transfer the files
+   *   (e.g., email, airdrop, etc.)
+   */
+  const handleShareLogs = async () => {
+    if (!accLogPath || !gyroLogPath) return;
+
+    try {
+      await Share.open({
+        title: 'Share logs',
+        message: 'Choose a method to share the sensor logs.',
+        urls: [
+          'file://' + accLogPath,
+          'file://' + gyroLogPath
+        ]
+      });
+    } catch (err) {
+      console.log('Share error:', err);
+    }
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.scrollContainer}>
+      <View style={styles.buttonContainer}>
+        <Button
+          title={isLogging ? 'Stop Logging' : 'Start Logging'}
+          onPress={handleToggleLogging}
+        />
+        <Button
+          title="Share Logs"
+          onPress={handleShareLogs}
+          disabled={!accLogPath && !gyroLogPath}
+        />
+      </View>
+
       {renderChart('Accelerometer', accXNorm, accYNorm, accZNorm)}
       {renderChart('Gyroscope', gyroXNorm, gyroYNorm, gyroZNorm)}
     </ScrollView>
@@ -158,7 +223,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 40,
     backgroundColor: '#fff',
-    // Ensure we have a layout that isn't zero width or height
     width: '100%'
   },
   chartContainer: {
@@ -169,5 +233,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 10
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '80%',
+    marginBottom: 20
   }
 });
